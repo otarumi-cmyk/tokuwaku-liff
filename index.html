@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>特別枠のご予約</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; background: #f5f6f8; color: #111; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; }
+  .card { background: #fff; border-radius: 16px; padding: 28px 22px; max-width: 420px; width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,.07); text-align: center; }
+  h1 { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
+  .sub { font-size: 13px; color: #777; line-height: 1.7; margin-bottom: 18px; }
+  .slot { background: #eef4ff; border: 1.5px solid #1a56db; border-radius: 12px; padding: 16px 12px; margin: 14px 0 18px; }
+  .slot .when { font-size: 22px; font-weight: 800; color: #1a56db; }
+  .slot .who { font-size: 13px; color: #555; margin-top: 4px; }
+  .btn { display: block; width: 100%; border: none; border-radius: 12px; background: #1a56db; color: #fff; font-size: 17px; font-weight: 800; padding: 16px; cursor: pointer; }
+  .btn:disabled { background: #a9b6cc; }
+  .note { font-size: 12px; color: #888; margin-top: 12px; line-height: 1.7; }
+  .meet { display: block; margin: 14px 0 6px; padding: 14px; border-radius: 12px; background: #0f6e56; color: #fff; font-weight: 800; font-size: 16px; text-decoration: none; word-break: break-all; }
+  .ok { color: #0f6e56; font-weight: 800; }
+  .ng { color: #a32d2d; font-weight: 800; }
+  .spin { width: 34px; height: 34px; border: 4px solid #dfe5ee; border-top-color: #1a56db; border-radius: 50%; margin: 8px auto 14px; animation: r 0.8s linear infinite; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .emoji { font-size: 40px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="card" id="app">
+  <div class="spin"></div>
+  <p class="sub" id="bootmsg">読み込んでいます…</p>
+</div>
+
+<script>
+var LIFF_ID = '2010582268-zVLYe3lY';
+var API = 'https://script.google.com/macros/s/AKfycbxToO2FHu5L1ESEDcKaUUcKujTZ5KDuD4oqf0AhdjZNEZIMvffaj6sawXkRXfSjxIqosg/exec';
+var CID = 'w' + Math.random().toString(36).slice(2, 8);
+var prof = { userId: '', displayName: '' };
+
+function beacon(stage, d) { // 遠隔診断(clientlogシートに残る)
+  try { new Image().src = API + '?page=log&cid=' + CID + '&stage=' + encodeURIComponent(stage) + (d ? '&d=' + encodeURIComponent(String(d).slice(0, 90)) : '') + '&t=' + Date.now(); } catch (e) {}
+}
+function el(html) { document.getElementById('app').innerHTML = html; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+function api(payload, retry) {
+  payload.uid = prof.userId; payload.name = prof.displayName;
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload), redirect: 'follow' })
+    .then(function (r) { return r.json(); })
+    .catch(function (e) {
+      if (!retry) return new Promise(function (res) { setTimeout(res, 1200); }).then(function () { return api(payload, 1); });
+      throw e;
+    });
+}
+
+function showLoading(msg) { el('<div class="spin"></div><p class="sub">' + esc(msg) + '</p>'); }
+
+function render(d) {
+  if (!d || !d.ok) { showError('通信に失敗しました。もう一度開き直してください。' + (d && d.err ? '(' + esc(d.err) + ')' : '')); return; }
+  beacon('view:' + d.view);
+  if (d.view === 'open') {
+    el('<h1>特別枠のご予約</h1>' +
+      '<p class="sub">キャンセルにより空いた面談枠です。<br><b>先着1名さま</b>で確定します。</p>' +
+      '<div class="slot"><div class="when">' + esc(d.label) + '</div>' + (d.staff ? '<div class="who">担当: ' + esc(d.staff) + '</div>' : '') + '</div>' +
+      '<button class="btn" id="go">この枠をもらう(先着1名)</button>' +
+      '<p class="note">' + esc(prof.displayName) + ' さまとしてご予約します。<br>入力は不要です。ボタンひとつで確定します。</p>');
+    document.getElementById('go').onclick = function () {
+      this.disabled = true; this.textContent = '確定処理中…';
+      beacon('claim-tap', d.slotId);
+      api({ api: 'claim', slotId: d.slotId }).then(render).catch(function (e) { showError('確定処理に失敗しました。開き直して再度お試しください。'); beacon('claim-fetch-fail', e); });
+    };
+  } else if (d.view === 'won') {
+    el('<div class="emoji">🎉</div><h1 class="ok">ご予約が確定しました！</h1>' +
+      '<div class="slot"><div class="when">' + esc(d.label) + '</div>' + (d.staff ? '<div class="who">担当: ' + esc(d.staff) + '</div>' : '') + '</div>' +
+      (d.meetUrl
+        ? '<a class="meet" href="' + esc(d.meetUrl) + '" target="_blank" rel="noopener">📹 当日はここから参加(Google Meet)</a>' +
+          '<p class="note">このURLは公式LINEのトークにもお送りしました📩<br>当日は開始5分前を目安にお入りください。</p>'
+        : '<p class="note">面談用のGoogle Meet URLは、まもなく<b>このLINEのトーク</b>にお送りします📩<br>少々お待ちください。</p>'));
+  } else if (d.view === 'lose') {
+    el('<div class="emoji">🙏</div><h1>ひと足違いで埋まりました</h1><p class="sub">' + esc(d.label || '') + ' の枠は先着の方で確定しました。<br>また枠が空いたらお知らせしますので、次の機会にぜひ！</p>');
+  } else if (d.view === 'none') {
+    el('<div class="emoji">📭</div><h1>ただいま募集中の枠はありません</h1><p class="sub">キャンセルで枠が空いたときに、このLINEでお知らせします。</p>');
+  } else {
+    el('<div class="emoji">⏰</div><h1>受付を終了しました</h1><p class="sub">' + esc(d.label || '') + ' の受付は終了しました。<br>また枠が空いたらお知らせします。</p>');
+  }
+}
+
+function showError(msg) {
+  el('<div class="emoji">⚠️</div><h1 class="ng">読み込みエラー</h1><p class="sub">' + esc(msg) + '</p>');
+}
+
+function boot() {
+  beacon('boot');
+  if (!window.liff) { showError('LINEの読み込みに失敗しました。通信環境をご確認のうえ開き直してください。'); beacon('sdk-missing'); return; }
+  liff.init({ liffId: LIFF_ID })
+    .then(function () {
+      beacon('init-ok', (liff.isInClient() ? 'in-client' : 'external'));
+      if (!liff.isLoggedIn()) { beacon('login-redirect'); liff.login({ redirectUri: window.location.href }); return; }
+      return liff.getProfile().then(function (pr) {
+        prof = pr;
+        beacon('profile-ok', pr.displayName);
+        showLoading('空き枠を確認しています…');
+        return api({ api: 'state' }).then(render);
+      });
+    })
+    .catch(function (e) {
+      beacon('init-fail', e && e.message);
+      showError('LINEの認証に失敗しました。いったんトークに戻り、リンクをもう一度タップしてください。');
+    });
+}
+
+// SDK読込10秒監視(無言ハング防止)
+setTimeout(function () { if (!window.__booted) { beacon('sdk-timeout'); showError('読み込みに時間がかかっています。通信環境をご確認のうえ、開き直してください。'); } }, 10000);
+</script>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"
+  onload="window.__booted=1;boot()"
+  onerror="window.__booted=1;beacon('sdk-error');showError('LINEの読み込みに失敗しました。開き直してください。')"></script>
+</body>
+</html>
