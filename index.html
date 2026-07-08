@@ -17,6 +17,8 @@
   .slot .btn { margin-top: 10px; padding: 13px; font-size: 16px; }
   .btn { display: block; width: 100%; border: none; border-radius: 12px; background: #1a56db; color: #fff; font-size: 17px; font-weight: 800; padding: 16px; cursor: pointer; }
   .btn:disabled { background: #a9b6cc; }
+  .btn.ghost { background: #fff; color: #1a56db; border: 1.5px solid #cdddff; margin-top: 10px; }
+  .btn.ghost:disabled { color: #a9b6cc; border-color: #e3e9f3; }
   .note { font-size: 12px; color: #888; margin-top: 12px; line-height: 1.7; }
   .meet { display: block; margin: 14px 0 6px; padding: 14px; border-radius: 12px; background: #0f6e56; color: #fff; font-weight: 800; font-size: 16px; text-decoration: none; word-break: break-all; }
   .ok { color: #0f6e56; font-weight: 800; }
@@ -56,45 +58,68 @@ function api(payload, retry) {
 
 function showLoading(msg) { el('<div class="spin"></div><p class="sub">' + esc(msg) + '</p>'); }
 
-function claimSlot(slotId) {
-  Array.prototype.forEach.call(document.querySelectorAll('.slotbtn'), function (b) { b.disabled = true; });
-  var tapped = document.querySelector('.slotbtn[data-slot="' + slotId + '"]');
-  if (tapped) tapped.textContent = '確定処理中…';
-  beacon('claim-tap', slotId);
-  api({ api: 'claim', slotId: slotId }).then(render).catch(function (e) { showError('確定処理に失敗しました。開き直して再度お試しください。'); beacon('claim-fetch-fail', e); });
+var openSlots = [];  // 直近の空き枠一覧(確認画面のラベル参照用)
+
+function labelOf(slotId) {
+  for (var i = 0; i < openSlots.length; i++) { if (openSlots[i].slotId === slotId) return openSlots[i].label; }
+  return '';
 }
 
-function render(d) {
+function reloadList() {
+  showLoading('空き枠を確認しています…');
+  api({ api: 'state' }).then(function (d) { render(d, 'state'); })
+    .catch(function (e) { showError('通信に失敗しました。開き直してください。'); });
+}
+
+/** 枠を選んだら、いきなり確定せず「確認画面」を出す(お客さま自身に確定してもらう) */
+function chooseSlot(slotId) {
+  beacon('choose', slotId);
+  el('<h1>この内容でご予約しますか？</h1>' +
+    '<div class="slot"><div class="when">' + esc(labelOf(slotId)) + '</div></div>' +
+    '<p class="sub">' + esc(prof.displayName) + ' さまとしてご予約します(<b>先着1名さま</b>)。<br>よろしければ下のボタンで確定してください。</p>' +
+    '<button class="btn" id="doConfirm">この日時で予約を確定する</button>' +
+    '<button class="btn ghost" id="goBack">← 別の枠を選び直す</button>');
+  document.getElementById('doConfirm').onclick = function () {
+    this.disabled = true; this.textContent = '確定処理中…';
+    var back = document.getElementById('goBack'); if (back) back.disabled = true;
+    beacon('confirm-tap', slotId);
+    api({ api: 'claim', slotId: slotId }).then(function (d) { render(d, 'claim'); })
+      .catch(function (e) { showError('確定処理に失敗しました。開き直して再度お試しください。'); beacon('claim-fetch-fail', e); });
+  };
+  document.getElementById('goBack').onclick = reloadList;
+}
+
+function render(d, source) {
   if (!d || !d.ok) { showError('通信に失敗しました。もう一度開き直してください。' + (d && d.err ? '(' + esc(d.err) + ')' : '')); return; }
-  beacon('view:' + d.view);
+  beacon('view:' + d.view + (source ? ':' + source : ''));
   if (d.view === 'open') {
-    var slots = d.slots || [];
-    var listHtml = slots.map(function (s) {
+    openSlots = d.slots || [];
+    var listHtml = openSlots.map(function (s) {
       return '<div class="slot"><div class="when">' + esc(s.label) + '</div>' +
-        '<button class="btn slotbtn" data-slot="' + esc(s.slotId) + '">この枠をもらう(先着1名)</button></div>';
+        '<button class="btn slotbtn" data-slot="' + esc(s.slotId) + '">この枠を選ぶ</button></div>';
     }).join('');
     el('<h1>特別枠のご予約</h1>' +
-      '<p class="sub">キャンセルで空いた面談枠が <b>' + slots.length + '件</b> あります。<br>ご希望の枠を選んでください(各枠<b>先着1名さま</b>)。</p>' +
+      '<p class="sub">キャンセルで空いた面談枠が <b>' + openSlots.length + '件</b> あります。<br>ご希望の枠を選んでください(各枠<b>先着1名さま</b>)。</p>' +
       listHtml +
-      '<p class="note">' + esc(prof.displayName) + ' さまとしてご予約します。<br>入力は不要です。ボタンひとつで確定します。</p>');
+      '<p class="note">' + esc(prof.displayName) + ' さまとしてご予約します。<br>枠を選ぶと確認画面が出ます(入力は不要です)。</p>');
     Array.prototype.forEach.call(document.querySelectorAll('.slotbtn'), function (btn) {
-      btn.onclick = function () { claimSlot(this.getAttribute('data-slot')); };
+      btn.onclick = function () { chooseSlot(this.getAttribute('data-slot')); };
     });
   } else if (d.view === 'won') {
-    el('<div class="emoji">🎉</div><h1 class="ok">ご予約が確定しました！</h1>' +
+    var fresh = (source === 'claim');  // claim経由=今確定 / state経由=既存予約の再表示
+    el('<div class="emoji">' + (fresh ? '🎉' : '✅') + '</div>' +
+      '<h1 class="ok">' + (fresh ? 'ご予約が確定しました！' : 'すでにご予約済みです') + '</h1>' +
+      (fresh ? '' : '<p class="sub">あなたのご予約はこちらです。</p>') +
       '<div class="slot"><div class="when">' + esc(d.label) + '</div></div>' +
       (d.meetUrl
         ? '<a class="meet" href="' + esc(d.meetUrl) + '" target="_blank" rel="noopener">📹 当日はここから参加(Google Meet)</a>' +
-          '<p class="note">このURLは公式LINEのトークにもお送りしました📩<br>当日は開始5分前を目安にお入りください。</p>'
+          '<p class="note">' + (fresh ? 'このURLは公式LINEのトークにもお送りしました📩<br>' : '') + '当日は開始5分前を目安にお入りください。</p>'
         : '<p class="note">面談用のGoogle Meet URLは、まもなく<b>このLINEのトーク</b>にお送りします📩<br>少々お待ちください。</p>'));
   } else if (d.view === 'lose') {
     el('<div class="emoji">🙏</div><h1>ひと足違いで埋まりました</h1>' +
       '<p class="sub">' + esc(d.label || '') + ' の枠は先着の方で確定しました。<br>他にあいている枠がないか確認できます。</p>' +
       '<button class="btn" id="relist">他のあき枠を見る</button>');
-    document.getElementById('relist').onclick = function () {
-      this.disabled = true; this.textContent = '確認中…';
-      api({ api: 'state' }).then(render).catch(function (e) { showError('通信に失敗しました。開き直してください。'); });
-    };
+    document.getElementById('relist').onclick = reloadList;
   } else if (d.view === 'none') {
     el('<div class="emoji">📭</div><h1>ただいま募集中の枠はありません</h1><p class="sub">キャンセルで枠が空いたときに、このLINEでお知らせします。</p>');
   } else {
@@ -117,7 +142,7 @@ function boot() {
         prof = pr;
         beacon('profile-ok', pr.displayName);
         showLoading('空き枠を確認しています…');
-        return api({ api: 'state' }).then(render);
+        return api({ api: 'state' }).then(function (d) { render(d, 'state'); });
       });
     })
     .catch(function (e) {
