@@ -14,6 +14,7 @@
   .slot { background: #eef4ff; border: 1.5px solid #1a56db; border-radius: 12px; padding: 16px 12px; margin: 14px 0 18px; }
   .slot .when { font-size: 22px; font-weight: 800; color: #1a56db; }
   .slot .who { font-size: 13px; color: #555; margin-top: 4px; }
+  .slot .btn { margin-top: 12px; }
   .btn { display: block; width: 100%; border: none; border-radius: 12px; background: #1a56db; color: #fff; font-size: 17px; font-weight: 800; padding: 16px; cursor: pointer; }
   .btn:disabled { background: #a9b6cc; }
   .note { font-size: 12px; color: #888; margin-top: 12px; line-height: 1.7; }
@@ -55,29 +56,45 @@ function api(payload, retry) {
 
 function showLoading(msg) { el('<div class="spin"></div><p class="sub">' + esc(msg) + '</p>'); }
 
+function claimSlot(slotId) {
+  Array.prototype.forEach.call(document.querySelectorAll('.slotbtn'), function (b) { b.disabled = true; });
+  var tapped = document.querySelector('.slotbtn[data-slot="' + slotId + '"]');
+  if (tapped) tapped.textContent = '確定処理中…';
+  beacon('claim-tap', slotId);
+  api({ api: 'claim', slotId: slotId }).then(render).catch(function (e) { showError('確定処理に失敗しました。開き直して再度お試しください。'); beacon('claim-fetch-fail', e); });
+}
+
 function render(d) {
   if (!d || !d.ok) { showError('通信に失敗しました。もう一度開き直してください。' + (d && d.err ? '(' + esc(d.err) + ')' : '')); return; }
   beacon('view:' + d.view);
   if (d.view === 'open') {
+    var slots = d.slots || [];
+    var listHtml = slots.map(function (s) {
+      return '<div class="slot"><div class="when">' + esc(s.label) + '</div>' +
+        '<button class="btn slotbtn" data-slot="' + esc(s.slotId) + '">この枠をもらう(先着1名)</button></div>';
+    }).join('');
     el('<h1>特別枠のご予約</h1>' +
-      '<p class="sub">キャンセルにより空いた面談枠です。<br><b>先着1名さま</b>で確定します。</p>' +
-      '<div class="slot"><div class="when">' + esc(d.label) + '</div>' + (d.staff ? '<div class="who">担当: ' + esc(d.staff) + '</div>' : '') + '</div>' +
-      '<button class="btn" id="go">この枠をもらう(先着1名)</button>' +
+      '<p class="sub">キャンセルにより空いた面談枠です。<br>ご希望の枠を選んでください(<b>先着1名さま</b>)。</p>' +
+      listHtml +
       '<p class="note">' + esc(prof.displayName) + ' さまとしてご予約します。<br>入力は不要です。ボタンひとつで確定します。</p>');
-    document.getElementById('go').onclick = function () {
-      this.disabled = true; this.textContent = '確定処理中…';
-      beacon('claim-tap', d.slotId);
-      api({ api: 'claim', slotId: d.slotId }).then(render).catch(function (e) { showError('確定処理に失敗しました。開き直して再度お試しください。'); beacon('claim-fetch-fail', e); });
-    };
+    Array.prototype.forEach.call(document.querySelectorAll('.slotbtn'), function (btn) {
+      btn.onclick = function () { claimSlot(this.getAttribute('data-slot')); };
+    });
   } else if (d.view === 'won') {
     el('<div class="emoji">🎉</div><h1 class="ok">ご予約が確定しました！</h1>' +
-      '<div class="slot"><div class="when">' + esc(d.label) + '</div>' + (d.staff ? '<div class="who">担当: ' + esc(d.staff) + '</div>' : '') + '</div>' +
+      '<div class="slot"><div class="when">' + esc(d.label) + '</div></div>' +
       (d.meetUrl
         ? '<a class="meet" href="' + esc(d.meetUrl) + '" target="_blank" rel="noopener">📹 当日はここから参加(Google Meet)</a>' +
           '<p class="note">このURLは公式LINEのトークにもお送りしました📩<br>当日は開始5分前を目安にお入りください。</p>'
         : '<p class="note">面談用のGoogle Meet URLは、まもなく<b>このLINEのトーク</b>にお送りします📩<br>少々お待ちください。</p>'));
   } else if (d.view === 'lose') {
-    el('<div class="emoji">🙏</div><h1>ひと足違いで埋まりました</h1><p class="sub">' + esc(d.label || '') + ' の枠は先着の方で確定しました。<br>また枠が空いたらお知らせしますので、次の機会にぜひ！</p>');
+    el('<div class="emoji">🙏</div><h1>ひと足違いで埋まりました</h1>' +
+      '<p class="sub">' + esc(d.label || '') + ' の枠は先着の方で確定しました。<br>他にあいている枠がないか確認できます。</p>' +
+      '<button class="btn" id="relist">他のあき枠を見る</button>');
+    document.getElementById('relist').onclick = function () {
+      this.disabled = true; this.textContent = '確認中…';
+      api({ api: 'state' }).then(render).catch(function (e) { showError('通信に失敗しました。開き直してください。'); });
+    };
   } else if (d.view === 'none') {
     el('<div class="emoji">📭</div><h1>ただいま募集中の枠はありません</h1><p class="sub">キャンセルで枠が空いたときに、このLINEでお知らせします。</p>');
   } else {
