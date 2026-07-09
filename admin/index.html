@@ -20,6 +20,7 @@
   select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235a6472' d='M6 8 0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 34px; }
   .rowf { display: flex; gap: 10px; }
   .rowf > div { flex: 1; }
+  .timepick { display: flex; gap: 8px; }
   .btn { display: block; width: 100%; border: none; border-radius: 12px; background: #1a56db; color: #fff; font-size: 17px; font-weight: 800; padding: 16px; margin-top: 20px; cursor: pointer; }
   .btn:disabled { background: #b7c1d4; }
   .msg { font-size: 13.5px; margin-top: 12px; padding: 12px 14px; border-radius: 10px; display: none; line-height: 1.6; }
@@ -53,11 +54,16 @@
     <div class="hint">日時と担当を選んで作成するだけ。Meetは自動で発行されます。<br><b>作成後、Lステップで配信を「複製→送信」してください。</b></div>
     <div class="rowf">
       <div><label>日付</label><input type="date" id="fDate"></div>
-      <div><label>開始時刻</label><input type="time" id="fTime" step="600" value="15:00"></div>
+      <div><label>開始時刻（10分刻み）</label>
+        <div class="timepick">
+          <select id="fHour" aria-label="時"></select>
+          <select id="fMin" aria-label="分"></select>
+        </div>
+      </div>
     </div>
     <div class="rowf">
       <div><label>担当者</label><select id="fStaff"><option value="">指定なし</option></select></div>
-      <div><label>面談の長さ</label><select id="fLen"><option value="30">30分</option><option value="60" selected>60分</option><option value="90">90分</option></select></div>
+      <div><label>面談の長さ</label><select id="fLen"><option value="60" selected>60分</option><option value="90">90分</option></select></div>
     </div>
     <button class="btn" id="createBtn">＋ この枠を作成する</button>
     <div class="msg" id="createMsg"></div>
@@ -123,10 +129,11 @@ function delSlot(slotId, claimed) {
 document.getElementById('reloadBtn').onclick = reload;
 document.getElementById('createBtn').onclick = function () {
   var btn = this, msg = document.getElementById('createMsg');
-  var date = document.getElementById('fDate').value, time = document.getElementById('fTime').value;
+  var date = document.getElementById('fDate').value;
+  var time = document.getElementById('fHour').value + ':' + document.getElementById('fMin').value;
   var staff = document.getElementById('fStaff').value, dur = document.getElementById('fLen').value;
   msg.className = 'msg';
-  if (!date || !time) { msg.className = 'msg ng show'; msg.textContent = '日付と開始時刻を入れてください。'; return; }
+  if (!date) { msg.className = 'msg ng show'; msg.textContent = '日付を入れてください。'; return; }
   btn.disabled = true; btn.textContent = '作成中…';
   apiGet({ action: 'admincreate', date: date, time: time, staff: staff, dur: dur }).then(function (r) {
     btn.disabled = false; btn.textContent = '＋ この枠を作成する';
@@ -143,6 +150,10 @@ document.getElementById('createBtn').onclick = function () {
 (function () {
   var d = new Date();
   document.getElementById('fDate').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  var hSel = document.getElementById('fHour');
+  for (var h = 0; h < 24; h++) { var hh = String(h).padStart(2, '0'); var o = document.createElement('option'); o.value = hh; o.textContent = hh + '時'; if (h === 15) o.selected = true; hSel.appendChild(o); }
+  var mSel = document.getElementById('fMin');
+  ['00', '10', '20', '30', '40', '50'].forEach(function (m) { var o = document.createElement('option'); o.value = m; o.textContent = m + '分'; mSel.appendChild(o); });
 })();
 if (!KEY) { document.getElementById('slotList').innerHTML = '<div class="empty" style="color:#a32d2d">アクセスキーがありません。キー付きのURLで開いてください。</div>'; }
 else { reload(); setInterval(reload, 30000); }
